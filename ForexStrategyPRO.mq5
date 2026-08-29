@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, straderShop Forex Strategy PRO"
 #property link      "https://fxstrategy.netlify.app"
-#property version   "1.00"
-#property description "Forex Strategy PRO Expert Advisor - Multifactor Strategy for EURUSD and Major Pairs."
+#property version   "1.10"
+#property description "Forex Strategy PRO Expert Advisor - Multi-Pair Strategy for EURUSD, GBPUSD, USDCAD, USDJPY."
 #property description "Includes Adaptive Layers, Daily Shield Protection, Trailing Stop, Break Even, and Interactive On-Chart Panel."
 
 #include <Trade\Trade.mqh>
@@ -74,10 +74,6 @@ CTrade          m_trade;
 CPositionInfo   m_position;
 CCanvas         m_canvas;
 
-// Font Definition for Canvas Text
-string          UI_FONT        = "Arial";
-int             UI_FONT_SIZE   = 12;
-
 // Handles
 int             h_fast_ema    = INVALID_HANDLE;
 int             h_slow_ema    = INVALID_HANDLE;
@@ -106,13 +102,22 @@ const int       PANEL_W      = 340;
 const int       PANEL_H      = 540;
 
 //+------------------------------------------------------------------+
+//| Helper for Pip Point Conversion (Supports 3 & 5 Digits / JPY)   |
+//+------------------------------------------------------------------+
+double GetPipValue()
+  {
+   if(_Digits == 3 || _Digits == 5) return _Point * 10.0;
+   return _Point;
+  }
+
+//+------------------------------------------------------------------+
 //| Expert Initialization Function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
   {
    m_trade.SetExpertMagicNumber(InpMagicNumber);
 
-   // Initialize Indicators
+   // Initialize Indicators for Current Symbol (EURUSD, GBPUSD, USDCAD, USDJPY)
    h_fast_ema = iMA(_Symbol, _Period, InpFastEma, 0, MODE_EMA, PRICE_CLOSE);
    h_slow_ema = iMA(_Symbol, _Period, InpSlowEma, 0, MODE_EMA, PRICE_CLOSE);
    h_rsi      = iRSI(_Symbol, _Period, InpRsiPeriod, PRICE_CLOSE);
@@ -121,7 +126,7 @@ int OnInit()
    if(h_fast_ema == INVALID_HANDLE || h_slow_ema == INVALID_HANDLE ||
       h_rsi == INVALID_HANDLE || h_atr == INVALID_HANDLE)
      {
-      Print("Error al crear handles de indicadores.");
+      Print("Error al crear handles de indicadores para ", _Symbol);
       return(INIT_FAILED);
      }
 
@@ -145,7 +150,7 @@ int OnInit()
    RenderPanel();
    ChartRedraw();
 
-   Print("Forex Strategy PRO iniciado correctamente.");
+   Print("Forex Strategy PRO iniciado correctamente en ", _Symbol, " (Digits: ", _Digits, ")");
    return(INIT_SUCCEEDED);
   }
 
@@ -313,21 +318,21 @@ void CheckEntrySignals()
    bool buy_condition  = (ema_f[0] > ema_s[0]) && (ema_f[1] <= ema_s[1]) && (rsi_val[0] > InpRsiBuyThreshold);
    bool sell_condition = (ema_f[0] < ema_s[0]) && (ema_f[1] >= ema_s[1]) && (rsi_val[0] < InpRsiSellThresh);
 
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double pip = GetPipValue();
 
    if(buy_condition)
      {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl  = ask - (InpStopLossPips * point * 10);
-      double tp  = ask + (InpTakeProfitPips * point * 10);
+      double sl  = ask - (InpStopLossPips * pip);
+      double tp  = ask + (InpTakeProfitPips * pip);
       m_trade.Buy(InpBaseLot, _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
       Print("Comprado Capa 1 a ", ask, " SL: ", sl, " TP: ", tp);
      }
    else if(sell_condition)
      {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl  = bid + (InpStopLossPips * point * 10);
-      double tp  = bid - (InpTakeProfitPips * point * 10);
+      double sl  = bid + (InpStopLossPips * pip);
+      double tp  = bid - (InpTakeProfitPips * pip);
       m_trade.Sell(InpBaseLot, _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
       Print("Vendido Capa 1 a ", bid, " SL: ", sl, " TP: ", tp);
      }
@@ -373,16 +378,16 @@ void ManageOpenPositions()
      {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      double grid_dist = InpGridStepPips * point * 10;
+      double pip = GetPipValue();
+      double grid_dist = InpGridStepPips * pip;
 
       if(pos_type == POSITION_TYPE_BUY)
         {
          if((last_open_price - ask) >= grid_dist)
            {
             double lot = InpBaseLot * MathPow(1.1, open_layers);
-            double sl  = ask - (InpStopLossPips * point * 10);
-            double tp  = ask + (InpTakeProfitPips * point * 10);
+            double sl  = ask - (InpStopLossPips * pip);
+            double tp  = ask + (InpTakeProfitPips * pip);
             m_trade.Buy(NormalizeDouble(lot, 2), _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
             Print("Añadida Capa Buy #", open_layers + 1, " a ", ask);
            }
@@ -392,8 +397,8 @@ void ManageOpenPositions()
          if((bid - last_open_price) >= grid_dist)
            {
             double lot = InpBaseLot * MathPow(1.1, open_layers);
-            double sl  = bid + (InpStopLossPips * point * 10);
-            double tp  = bid - (InpTakeProfitPips * point * 10);
+            double sl  = bid + (InpStopLossPips * pip);
+            double tp  = bid - (InpTakeProfitPips * pip);
             m_trade.Sell(NormalizeDouble(lot, 2), _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
             Print("Añadida Capa Sell #", open_layers + 1, " a ", bid);
            }
@@ -408,9 +413,9 @@ void ApplyBreakEven(ulong ticket)
   {
    if(!m_position.SelectByTicket(ticket)) return;
 
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double trigger = InpBreakEvenPips * point * 10;
-   double lock_pts = InpBreakEvenLock * point * 10;
+   double pip = GetPipValue();
+   double trigger  = InpBreakEvenPips * pip;
+   double lock_pts = InpBreakEvenLock * pip;
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
      {
@@ -447,9 +452,9 @@ void ApplyTrailingStop(ulong ticket)
   {
    if(!m_position.SelectByTicket(ticket)) return;
 
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double start_dist = InpTrailingStart * point * 10;
-   double step_dist  = InpTrailingStep * point * 10;
+   double pip = GetPipValue();
+   double start_dist = InpTrailingStart * pip;
+   double step_dist  = InpTrailingStep * pip;
 
    if(m_position.PositionType() == POSITION_TYPE_BUY)
      {
@@ -524,9 +529,9 @@ void LockProfits()
            {
             if(m_position.Profit() > 0)
               {
-               double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+               double pip = GetPipValue();
                double current_price = (m_position.PositionType() == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - 10 * point : current_price + 10 * point;
+               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - (2.0 * pip) : current_price + (2.0 * pip);
                m_trade.PositionModify(m_position.Ticket(), NormalizeDouble(lock_sl, _Digits), m_position.TakeProfit());
               }
            }
@@ -539,7 +544,6 @@ void LockProfits()
 //+------------------------------------------------------------------+
 void HandlePanelClick(int x, int y)
   {
-   // Tab Bar Click (Y: 45 to 75)
    if(y >= 45 && y <= 75)
      {
       int tab_w = PANEL_W / 6;
@@ -553,18 +557,12 @@ void HandlePanelClick(int x, int y)
 
    if(g_current_tab == TAB_CTA)
      {
-      // TRAIL ON/OFF (X: 15-115, Y: 460-490)
       if(x >= 15 && x <= 115 && y >= 460 && y <= 490) g_trail_active = !g_trail_active;
-      // BE ON/OFF (X: 120-220, Y: 460-490)
       if(x >= 120 && x <= 220 && y >= 460 && y <= 490) g_be_active = !g_be_active;
-      // ASEGURAR (X: 225-325, Y: 460-490)
       if(x >= 225 && x <= 325 && y >= 460 && y <= 490) LockProfits();
 
-      // SHIELD ON/OFF (X: 15-115, Y: 495-525)
       if(x >= 15 && x <= 115 && y >= 495 && y <= 525) g_shield_active = !g_shield_active;
-      // PAUSAR (X: 120-220, Y: 495-525)
       if(x >= 120 && x <= 220 && y >= 495 && y <= 525) g_paused = !g_paused;
-      // CERRAR (X: 225-325, Y: 495-525)
       if(x >= 225 && x <= 325 && y >= 495 && y <= 525) CloseAllPositions();
      }
   }
@@ -574,19 +572,16 @@ void HandlePanelClick(int x, int y)
 //+------------------------------------------------------------------+
 void RenderPanel()
   {
-   // Background
    m_canvas.FillRectangle(0, 0, PANEL_W, PANEL_H, ColorToARGB(0x0a0a0e, 240));
    m_canvas.Rectangle(0, 0, PANEL_W - 1, PANEL_H - 1, ColorToARGB(0x00e676, 255));
 
-   // Header Bar
    m_canvas.FillRectangle(1, 1, PANEL_W - 2, 40, ColorToARGB(0x111116, 255));
-   m_canvas.TextOut(15, 12, "FOREX STRATEGY PRO", ColorToARGB(0x00e676, 255));
+   m_canvas.TextOut(15, 12, "FOREX STRATEGY PRO (" + _Symbol + ")", ColorToARGB(0x00e676, 255));
 
    string status_str = g_paused ? "PAUSADO" : (g_shield_hit ? "SHIELD HIT" : "ACTIVO");
    color status_col  = g_paused ? 0x00ffff00 : (g_shield_hit ? 0x000000ff : 0x0000ff00);
    m_canvas.TextOut(240, 12, status_str, ColorToARGB(status_col, 255));
 
-   // Tabs Render
    string tabs[6] = {"CTA", "CFG", "STAT", "INTEL", "HIST", "?"};
    int tab_w = PANEL_W / 6;
    for(int i = 0; i < 6; i++)
@@ -599,7 +594,6 @@ void RenderPanel()
       m_canvas.TextOut(x1 + 10, 50, tabs[i], ColorToARGB(tab_fg, 255));
      }
 
-   // Render Tab Specific Contents
    switch(g_current_tab)
      {
       case TAB_CTA:   RenderTabCTA(); break;
@@ -651,7 +645,6 @@ void RenderTabCTA()
    m_canvas.TextOut(15, y, "SPREAD:", ColorToARGB(0x888888, 255));
    m_canvas.TextOut(200, y, DoubleToString(spread_pts, 1) + " pts", ColorToARGB(0xffffff, 255));
 
-   // Daily Shield Gauge
    y += 35;
    m_canvas.TextOut(15, y, "SHIELD HOY (Límite Pérdida)", ColorToARGB(0x00e676, 255));
    y += 20;
@@ -667,13 +660,11 @@ void RenderTabCTA()
    color bar_col = (loss_pct > max_pct * 0.8) ? 0xff4444 : 0x00e676;
    if(fill_w > 0) m_canvas.FillRectangle(15, y, 15 + fill_w, y + 8, ColorToARGB(bar_col, 255));
 
-   // Buttons Row 1
    y = 460;
    DrawButton(15, y, 100, 30, "TRAIL", g_trail_active);
    DrawButton(120, y, 100, 30, "BE", g_be_active);
    DrawButton(225, y, 100, 30, "ASEGURAR", false, 0x00a050);
 
-   // Buttons Row 2
    y = 495;
    DrawButton(15, y, 100, 30, "SHIELD", g_shield_active);
    DrawButton(120, y, 100, 30, g_paused ? "REANUDAR" : "PAUSAR", g_paused, 0xffaa00);
@@ -694,6 +685,7 @@ void RenderTabCFG()
    if(InpRiskProfile == PROFILE_AGGRESSIVE) prof_name = "Agresivo";
 
    m_canvas.TextOut(15, y, "Perfil de Riesgo: " + prof_name, ColorToARGB(0xffffff, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Par Activo: " + _Symbol, ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Lote Base Inicial: " + DoubleToString(InpBaseLot, 2), ColorToARGB(0xcccccc, 255)); y += 25;
    m_canvas.TextOut(15, y, "Capas Máximas: " + IntegerToString(InpMaxLayers), ColorToARGB(0xcccccc, 255)); y += 25;
    m_canvas.TextOut(15, y, "Paso de Grid: " + DoubleToString(InpGridStepPips, 1) + " Pips", ColorToARGB(0xcccccc, 255)); y += 25;
@@ -788,10 +780,10 @@ void RenderTabHELP()
    int y = 90;
    m_canvas.TextOut(15, y, "GUÍA RÁPIDA DE USO", ColorToARGB(0x00e676, 255));
    y += 25;
-   m_canvas.TextOut(15, y, "1. Shield limita tu pérdida máxima diaria.", ColorToARGB(0xcccccc, 255)); y += 20;
-   m_canvas.TextOut(15, y, "2. Trailing Stop asegura tus ganancias.", ColorToARGB(0xcccccc, 255)); y += 20;
-   m_canvas.TextOut(15, y, "3. Break Even mueve tu SL a cero.", ColorToARGB(0xcccccc, 255)); y += 20;
-   m_canvas.TextOut(15, y, "4. Presiona ASEGURAR para asegurar hoy.", ColorToARGB(0xcccccc, 255)); y += 20;
+   m_canvas.TextOut(15, y, "1. Compatible con EURUSD, GBPUSD, USDCAD, USDJPY.", ColorToARGB(0x00e676, 255)); y += 20;
+   m_canvas.TextOut(15, y, "2. Shield limita tu pérdida máxima diaria.", ColorToARGB(0xcccccc, 255)); y += 20;
+   m_canvas.TextOut(15, y, "3. Trailing Stop asegura tus ganancias.", ColorToARGB(0xcccccc, 255)); y += 20;
+   m_canvas.TextOut(15, y, "4. Break Even mueve tu SL a cero.", ColorToARGB(0xcccccc, 255)); y += 20;
    m_canvas.TextOut(15, y, "5. Soporte VIP: t.me/estrategieVipsupp", ColorToARGB(0x00e676, 255));
   }
 
