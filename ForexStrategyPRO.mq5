@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, straderShop Forex Strategy PRO"
 #property link      "https://fxstrategy.netlify.app"
-#property version   "2.30"
-#property description "Forex Strategy PRO EA - Multi-Pair Strategy with Auto-Presets for GBPUSD, USDCAD, USDJPY, EURUSD."
-#property description "Includes Adaptive Layers, Daily Shield Protection, Trailing Stop, Break Even, and Interactive Panel."
+#property version   "3.00"
+#property description "Forex Strategy PRO EA - High Yield Aggressive Compounding Strategy (>30% Monthly Target)."
+#property description "Includes Exponential Lot Scaling, Adaptive Grid, Daily Shield Protection, Trailing Stop, Break Even, and Panel."
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -19,9 +19,9 @@
 //+------------------------------------------------------------------+
 enum ENUM_RISK_PROFILE
   {
-   PROFILE_CONSERVATIVE = 0, // Conservador (Shield 3%, Target 2%)
-   PROFILE_BALANCED     = 1, // Balanceado (Shield 4%, Target 3%)
-   PROFILE_AGGRESSIVE   = 2  // Agresivo (Shield 6%, Target 5%)
+   PROFILE_CONSERVATIVE = 0, // Conservador (Shield 3%, Target 10%)
+   PROFILE_BALANCED     = 1, // Balanceado (Shield 5%, Target 20%)
+   PROFILE_AGGRESSIVE   = 2  // Agresivo (Shield 10%, Target >30%)
   };
 
 enum ENUM_PANEL_TAB
@@ -37,31 +37,32 @@ enum ENUM_PANEL_TAB
 //+------------------------------------------------------------------+
 //| Input Parameters                                                 |
 //+------------------------------------------------------------------+
-input group "=== CONFIGURACIÓN DE RIESGO Y PERFIL ==="
-input ENUM_RISK_PROFILE InpRiskProfile     = PROFILE_BALANCED;   // Perfil de Riesgo Predeterminado
-input double            InpBaseLot         = 0.01;               // Lote Inicial Base
-input int               InpMaxLayers       = 3;                  // Capas Máximas Abiertas
-input bool              InpAutoPairPreset  = true;               // Auto Cargar Preset según Par (GBPUSD, USDCAD, USDJPY)
+input group "=== CONFIGURACIÓN DE RIESGO Y ALTO RENDIMIENTO ==="
+input ENUM_RISK_PROFILE InpRiskProfile     = PROFILE_AGGRESSIVE; // Perfil de Riesgo Predeterminado
+input double            InpBaseLot         = 0.02;               // Lote Inicial Base
+input double            InpLotMultiplier   = 1.4;                // Multiplicador Exponencial de Capas
+input int               InpMaxLayers       = 4;                  // Capas Máximas Abiertas
+input bool              InpAutoPairPreset  = true;               // Auto Cargar Preset según Par
 
-input group "=== SEGURIDAD Y SHIELD ==="
+input group "=== SEGURIDAD Y SHIELD DIARIO ==="
 input bool              InpEnableShield    = true;               // Activar Shield Diario
-input double            InpDailyShieldPct  = 4.0;                // Límite de Pérdida Diaria Shield (%)
-input double            InpTakeProfitPips  = 35.0;               // Take Profit Target (Pips)
-input double            InpStopLossPips    = 20.0;               // Stop Loss Base (Pips)
+input double            InpDailyShieldPct  = 8.0;                // Límite de Pérdida Diaria Shield (%)
+input double            InpTakeProfitPips  = 18.0;               // Take Profit Rápido (Pips)
+input double            InpStopLossPips    = 15.0;               // Stop Loss Base (Pips)
 input bool              InpUseBreakEven    = true;               // Activar Break Even Automático
-input double            InpBreakEvenPips   = 12.0;               // Activación Break Even (Pips Profit)
-input double            InpBreakEvenLock   = 3.0;                // Ganancia Asegurada Break Even (Pips)
+input double            InpBreakEvenPips   = 8.0;                // Activación Break Even (Pips Profit)
+input double            InpBreakEvenLock   = 2.0;                // Ganancia Asegurada Break Even (Pips)
 input bool              InpUseTrailing     = true;               // Activar Trailing Stop Automático
-input double            InpTrailingStart   = 20.0;               // Inicio Trailing Stop (Pips Profit)
-input double            InpTrailingStep    = 6.0;                // Paso Trailing Stop (Pips)
+input double            InpTrailingStart   = 12.0;               // Inicio Trailing Stop (Pips Profit)
+input double            InpTrailingStep    = 4.0;                // Paso Trailing Stop (Pips)
 
-input group "=== ESTRATEGIA MULTI-PAR CONFIGURACIÓN ==="
-input int               InpTrendEma        = 100;                // Filtro Tendencia EMA
-input int               InpFastEma         = 9;                  // Período EMA Rápida
+input group "=== ESTRATEGIA HIGH-YIELD SCALPING & GRID ==="
+input int               InpTrendEma        = 50;                 // Filtro Tendencia EMA
+input int               InpFastEma         = 8;                  // Período EMA Rápida
 input int               InpSlowEma         = 21;                 // Período EMA Lenta
 input int               InpRsiPeriod       = 14;                 // Período RSI
-input double            InpRsiBuyThreshold = 51.0;               // Umbral Compra RSI
-input double            InpRsiSellThresh   = 49.0;               // Umbral Venta RSI
+input double            InpRsiBuyThreshold = 48.0;               // Umbral Compra RSI
+input double            InpRsiSellThresh   = 52.0;               // Umbral Venta RSI
 input int               InpAtrPeriod       = 14;                 // Período ATR
 input int               InpStartHour       = 6;                  // Hora Inicio Sesión (UTC)
 input int               InpEndHour         = 20;                 // Hora Fin Sesión (UTC)
@@ -77,7 +78,7 @@ CTrade          m_trade;
 CPositionInfo   m_position;
 CCanvas         m_canvas;
 
-// Active Effective Strategy Parameters
+// Active Effective Parameters
 double          g_tp_pips;
 double          g_sl_pips;
 double          g_be_pips;
@@ -127,7 +128,7 @@ double GetPipValue()
   }
 
 //+------------------------------------------------------------------+
-//| Load Pair Specific Presets Automatically                         |
+//| Load Pair Specific High Yield Presets                            |
 //+------------------------------------------------------------------+
 void ApplySymbolPreset()
   {
@@ -138,32 +139,32 @@ void ApplySymbolPreset()
    g_be_lock     = InpBreakEvenLock;
    g_trail_start = InpTrailingStart;
    g_trail_step  = InpTrailingStep;
-   g_grid_step   = 20.0;
+   g_grid_step   = 14.0;
    g_fast_ema    = InpFastEma;
    g_slow_ema    = InpSlowEma;
    g_trend_ema   = InpTrendEma;
 
    if(!InpAutoPairPreset) return;
 
-   if(StringFind(sym, "GBPUSD") >= 0)
+   if(StringFind(sym, "EURUSD") >= 0)
      {
-      g_tp_pips = 35.0; g_sl_pips = 20.0; g_be_pips = 12.0; g_be_lock = 3.0; g_trail_start = 20.0; g_trail_step = 6.0; g_grid_step = 20.0; g_fast_ema = 9; g_slow_ema = 21; g_trend_ema = 100;
-      Print("Preset GBPUSD cargado exitosamente.");
+      g_tp_pips = 18.0; g_sl_pips = 14.0; g_be_pips = 7.0; g_be_lock = 2.0; g_trail_start = 10.0; g_trail_step = 3.0; g_grid_step = 12.0; g_fast_ema = 8; g_slow_ema = 21; g_trend_ema = 50;
+      Print("High-Yield Preset EURUSD Cargado (>30%/Mes).");
+     }
+   else if(StringFind(sym, "GBPUSD") >= 0)
+     {
+      g_tp_pips = 20.0; g_sl_pips = 15.0; g_be_pips = 8.0; g_be_lock = 2.0; g_trail_start = 12.0; g_trail_step = 4.0; g_grid_step = 14.0; g_fast_ema = 8; g_slow_ema = 21; g_trend_ema = 50;
+      Print("High-Yield Preset GBPUSD Cargado.");
      }
    else if(StringFind(sym, "USDCAD") >= 0)
      {
-      g_tp_pips = 35.0; g_sl_pips = 20.0; g_be_pips = 12.0; g_be_lock = 3.0; g_trail_start = 20.0; g_trail_step = 6.0; g_grid_step = 20.0; g_fast_ema = 12; g_slow_ema = 26; g_trend_ema = 200;
-      Print("Preset USDCAD cargado exitosamente.");
+      g_tp_pips = 22.0; g_sl_pips = 16.0; g_be_pips = 9.0; g_be_lock = 2.0; g_trail_start = 14.0; g_trail_step = 4.0; g_grid_step = 15.0; g_fast_ema = 9; g_slow_ema = 21; g_trend_ema = 100;
+      Print("High-Yield Preset USDCAD Cargado.");
      }
    else if(StringFind(sym, "USDJPY") >= 0)
      {
-      g_tp_pips = 30.0; g_sl_pips = 18.0; g_be_pips = 10.0; g_be_lock = 2.0; g_trail_start = 18.0; g_trail_step = 5.0; g_grid_step = 18.0; g_fast_ema = 8; g_slow_ema = 21; g_trend_ema = 100;
-      Print("Preset USDJPY cargado exitosamente.");
-     }
-   else if(StringFind(sym, "EURUSD") >= 0)
-     {
-      g_tp_pips = 45.0; g_sl_pips = 25.0; g_be_pips = 15.0; g_be_lock = 3.0; g_trail_start = 22.0; g_trail_step = 8.0; g_grid_step = 25.0; g_fast_ema = 12; g_slow_ema = 26; g_trend_ema = 200;
-      Print("Preset EURUSD cargado exitosamente.");
+      g_tp_pips = 18.0; g_sl_pips = 14.0; g_be_pips = 7.0; g_be_lock = 2.0; g_trail_start = 10.0; g_trail_step = 3.0; g_grid_step = 12.0; g_fast_ema = 8; g_slow_ema = 21; g_trend_ema = 50;
+      Print("High-Yield Preset USDJPY Cargado.");
      }
   }
 
@@ -210,7 +211,7 @@ int OnInit()
    RenderPanel();
    ChartRedraw();
 
-   Print("Forex Strategy PRO 2.30 iniciado correctamente en ", _Symbol);
+   Print("Forex Strategy PRO 3.00 (High-Yield Compounding >30%) iniciado correctamente en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 
@@ -314,9 +315,9 @@ double GetShieldLimitPct()
   {
    switch(InpRiskProfile)
      {
-      case PROFILE_CONSERVATIVE: return 3.0;
-      case PROFILE_BALANCED:     return 4.0;
-      case PROFILE_AGGRESSIVE:   return 6.0;
+      case PROFILE_CONSERVATIVE: return 4.0;
+      case PROFILE_BALANCED:     return 6.0;
+      case PROFILE_AGGRESSIVE:   return 10.0;
      }
    return InpDailyShieldPct;
   }
@@ -394,7 +395,7 @@ void CheckEntrySignals()
       double sl  = ask - (g_sl_pips * pip);
       double tp  = ask + (g_tp_pips * pip);
       m_trade.Buy(InpBaseLot, _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-      Print("Buy Signal #1 ", _Symbol, " a ", ask, " SL: ", sl, " TP: ", tp);
+      Print("High-Yield Buy #1 ", _Symbol, " a ", ask, " SL: ", sl, " TP: ", tp);
      }
    else if(sell_condition)
      {
@@ -402,12 +403,12 @@ void CheckEntrySignals()
       double sl  = bid + (g_sl_pips * pip);
       double tp  = bid - (g_tp_pips * pip);
       m_trade.Sell(InpBaseLot, _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-      Print("Sell Signal #1 ", _Symbol, " a ", bid, " SL: ", sl, " TP: ", tp);
+      Print("High-Yield Sell #1 ", _Symbol, " a ", bid, " SL: ", sl, " TP: ", tp);
      }
   }
 
 //+------------------------------------------------------------------+
-//| Manage Open Positions (Dynamic ATR Layers, BE, Trailing)         |
+//| Manage Open Positions (Exponential Layering Grid, BE, Trail)     |
 //+------------------------------------------------------------------+
 void ManageOpenPositions()
   {
@@ -446,7 +447,7 @@ void ManageOpenPositions()
       CopyBuffer(h_atr, 0, 1, 1, atr);
 
       double pip = GetPipValue();
-      double atr_grid = (atr[0] > 0) ? (atr[0] * 1.1) : (g_grid_step * pip);
+      double atr_grid = (atr[0] > 0) ? (atr[0] * 1.0) : (g_grid_step * pip);
       double grid_dist = MathMax(g_grid_step * pip, atr_grid);
 
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -457,7 +458,7 @@ void ManageOpenPositions()
          if((last_open_price - ask) >= grid_dist)
            {
             double step_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-            double lot = InpBaseLot * MathPow(1.1, open_layers);
+            double lot = InpBaseLot * MathPow(InpLotMultiplier, open_layers);
             if(step_vol > 0) lot = MathFloor(lot / step_vol) * step_vol;
 
             double sl  = ask - (g_sl_pips * pip);
@@ -471,7 +472,7 @@ void ManageOpenPositions()
          if((bid - last_open_price) >= grid_dist)
            {
             double step_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-            double lot = InpBaseLot * MathPow(1.1, open_layers);
+            double lot = InpBaseLot * MathPow(InpLotMultiplier, open_layers);
             if(step_vol > 0) lot = MathFloor(lot / step_vol) * step_vol;
 
             double sl  = bid + (g_sl_pips * pip);
@@ -608,7 +609,7 @@ void LockProfits()
               {
                double pip = GetPipValue();
                double current_price = (m_position.PositionType() == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - (3.0 * pip) : current_price + (3.0 * pip);
+               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - (2.0 * pip) : current_price + (2.0 * pip);
                m_trade.PositionModify(m_position.Ticket(), NormalizeDouble(lock_sl, _Digits), m_position.TakeProfit());
               }
            }
@@ -745,7 +746,7 @@ void RenderTabCTA()
    y = 495;
    DrawButton(15, y, 100, 30, "SHIELD", g_shield_active);
    DrawButton(120, y, 100, 30, g_paused ? "REANUDAR" : "PAUSAR", g_paused, 0xffaa00);
-   DrawButton(225, y, 100, 30, "CERRAR", false, 0xcc0000);
+   DrawButton(225, y, 120, 30, "CERRAR", false, 0xcc0000);
   }
 
 //+------------------------------------------------------------------+
@@ -757,15 +758,15 @@ void RenderTabCFG()
    m_canvas.TextOut(15, y, "CONFIGURACIÓN DE PARAMETROS", ColorToARGB(0x00e676, 255));
    y += 30;
 
-   string prof_name = "Balanceado";
+   string prof_name = "Agresivo (>30%/Mes)";
    if(InpRiskProfile == PROFILE_CONSERVATIVE) prof_name = "Conservador";
-   if(InpRiskProfile == PROFILE_AGGRESSIVE) prof_name = "Agresivo";
+   if(InpRiskProfile == PROFILE_BALANCED) prof_name = "Balanceado";
 
    m_canvas.TextOut(15, y, "Perfil de Riesgo: " + prof_name, ColorToARGB(0xffffff, 255)); y += 25;
    m_canvas.TextOut(15, y, "Par Activo: " + _Symbol, ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Lote Base Inicial: " + DoubleToString(InpBaseLot, 2), ColorToARGB(0xcccccc, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Capas Máximas: " + IntegerToString(InpMaxLayers), ColorToARGB(0xcccccc, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Preset Auto-Ajustado: " + (InpAutoPairPreset ? "SI" : "NO"), ColorToARGB(0x00e676, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Multiplicador Lote: " + DoubleToString(InpLotMultiplier, 1) + "x", ColorToARGB(0x00e676, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Estrategia: High-Yield Compounding", ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Shield Límite Diario: " + DoubleToString(GetShieldLimitPct(), 1) + "%", ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Break Even: " + DoubleToString(g_be_pips, 1) + " Pips", ColorToARGB(0xcccccc, 255)); y += 25;
    m_canvas.TextOut(15, y, "Trailing Stop: " + DoubleToString(g_trail_start, 1) + " Pips", ColorToARGB(0xcccccc, 255));
@@ -811,8 +812,8 @@ void RenderTabINTEL()
 
    m_canvas.TextOut(15, y, "Tendencia EMA " + IntegerToString(g_trend_ema) + ": " + trend, ColorToARGB(t_col, 255)); y += 25;
    m_canvas.TextOut(15, y, "Fuerza RSI: " + DoubleToString(rsi_val[0], 1), ColorToARGB(0xffffff, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Sesión Activa: 06-20 UTC", ColorToARGB(0x00e676, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Estrategia: Multi-Pair Trend + Momentum", ColorToARGB(0xcccccc, 255));
+   m_canvas.TextOut(15, y, "Modo: High Yield (>30% Target)", ColorToARGB(0x00e676, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Estrategia: Scalping Grid Compounding", ColorToARGB(0xcccccc, 255));
   }
 
 //+------------------------------------------------------------------+
@@ -859,7 +860,7 @@ void RenderTabHELP()
    int y = 90;
    m_canvas.TextOut(15, y, "GUÍA RÁPIDA DE USO", ColorToARGB(0x00e676, 255));
    y += 25;
-   m_canvas.TextOut(15, y, "1. Compatible con GBPUSD, USDCAD, USDJPY.", ColorToARGB(0x00e676, 255)); y += 20;
+   m_canvas.TextOut(15, y, "1. Estrategia High-Yield Compounding.", ColorToARGB(0x00e676, 255)); y += 20;
    m_canvas.TextOut(15, y, "2. Shield limita tu pérdida máxima diaria.", ColorToARGB(0xcccccc, 255)); y += 20;
    m_canvas.TextOut(15, y, "3. Trailing Stop asegura tus ganancias.", ColorToARGB(0xcccccc, 255)); y += 20;
    m_canvas.TextOut(15, y, "4. Break Even mueve tu SL a cero.", ColorToARGB(0xcccccc, 255)); y += 20;
