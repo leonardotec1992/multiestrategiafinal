@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, straderShop Forex Strategy PRO"
 #property link      "https://fxstrategy.netlify.app"
-#property version   "1.10"
-#property description "Forex Strategy PRO Expert Advisor - Multi-Pair Strategy for EURUSD, GBPUSD, USDCAD, USDJPY."
+#property version   "2.10"
+#property description "Forex Strategy PRO Expert Advisor - Advanced EURUSD London Asian Breakout + Trend Strategy."
 #property description "Includes Adaptive Layers, Daily Shield Protection, Trailing Stop, Break Even, and Interactive On-Chart Panel."
 
 #include <Trade\Trade.mqh>
@@ -40,28 +40,31 @@ enum ENUM_PANEL_TAB
 input group "=== CONFIGURACIÓN DE RIESGO Y PERFIL ==="
 input ENUM_RISK_PROFILE InpRiskProfile     = PROFILE_BALANCED;   // Perfil de Riesgo Predeterminado
 input double            InpBaseLot         = 0.01;               // Lote Inicial Base
-input int               InpMaxLayers       = 4;                  // Capas Máximas Abiertas
-input double            InpGridStepPips    = 20.0;               // Distancia entre Capas (Pips)
+input int               InpMaxLayers       = 3;                  // Capas Máximas Abiertas
+input double            InpGridStepPips    = 25.0;               // Distancia entre Capas (Pips)
 
 input group "=== SEGURIDAD Y SHIELD ==="
 input bool              InpEnableShield    = true;               // Activar Shield Diario
 input double            InpDailyShieldPct  = 4.0;                // Límite de Pérdida Diaria Shield (%)
-input double            InpTakeProfitPips  = 30.0;               // Take Profit Target (Pips)
-input double            InpStopLossPips    = 15.0;               // Stop Loss Base (Pips)
+input double            InpTakeProfitPips  = 45.0;               // Take Profit Target (Pips)
+input double            InpStopLossPips    = 25.0;               // Stop Loss Base (Pips)
 input bool              InpUseBreakEven    = true;               // Activar Break Even Automático
-input double            InpBreakEvenPips   = 5.0;                // Activación Break Even (Pips Profit)
-input double            InpBreakEvenLock   = 2.0;                // Ganancia Asegurada Break Even (Pips)
+input double            InpBreakEvenPips   = 15.0;               // Activación Break Even (Pips Profit)
+input double            InpBreakEvenLock   = 3.0;                // Ganancia Asegurada Break Even (Pips)
 input bool              InpUseTrailing     = true;               // Activar Trailing Stop Automático
-input double            InpTrailingStart   = 12.0;               // Inicio Trailing Stop (Pips Profit)
-input double            InpTrailingStep    = 5.0;                // Paso Trailing Stop (Pips)
+input double            InpTrailingStart   = 22.0;               // Inicio Trailing Stop (Pips Profit)
+input double            InpTrailingStep    = 8.0;                // Paso Trailing Stop (Pips)
 
-input group "=== ESTRATEGIA MULTIFACTOR ==="
+input group "=== ESTRATEGIA BREAKOUT & TREND (EURUSD OPTIMIZADA) ==="
+input int               InpTrendEma        = 200;                // Filtro Tendencia EMA 200
 input int               InpFastEma         = 12;                 // Período EMA Rápida
 input int               InpSlowEma         = 26;                 // Período EMA Lenta
 input int               InpRsiPeriod       = 14;                 // Período RSI
-input double            InpRsiBuyThreshold = 50.0;               // Umbral Compra RSI
-input double            InpRsiSellThresh   = 50.0;               // Umbral Venta RSI
+input double            InpRsiBuyThreshold = 52.0;               // Umbral Compra RSI
+input double            InpRsiSellThresh   = 48.0;               // Umbral Venta RSI
 input int               InpAtrPeriod       = 14;                 // Período ATR
+input int               InpStartHour       = 7;                  // Hora Inicio Sesión (UTC)
+input int               InpEndHour         = 18;                 // Hora Fin Sesión (UTC)
 
 input group "=== SISTEMA Y MÁGICO ==="
 input ulong             InpMagicNumber     = 202604;             // Número Mágico
@@ -75,6 +78,7 @@ CPositionInfo   m_position;
 CCanvas         m_canvas;
 
 // Handles
+int             h_trend_ema   = INVALID_HANDLE;
 int             h_fast_ema    = INVALID_HANDLE;
 int             h_slow_ema    = INVALID_HANDLE;
 int             h_rsi         = INVALID_HANDLE;
@@ -117,14 +121,15 @@ int OnInit()
   {
    m_trade.SetExpertMagicNumber(InpMagicNumber);
 
-   // Initialize Indicators for Current Symbol (EURUSD, GBPUSD, USDCAD, USDJPY)
-   h_fast_ema = iMA(_Symbol, _Period, InpFastEma, 0, MODE_EMA, PRICE_CLOSE);
-   h_slow_ema = iMA(_Symbol, _Period, InpSlowEma, 0, MODE_EMA, PRICE_CLOSE);
-   h_rsi      = iRSI(_Symbol, _Period, InpRsiPeriod, PRICE_CLOSE);
-   h_atr      = iATR(_Symbol, _Period, InpAtrPeriod);
+   // Initialize Indicators
+   h_trend_ema = iMA(_Symbol, _Period, InpTrendEma, 0, MODE_EMA, PRICE_CLOSE);
+   h_fast_ema  = iMA(_Symbol, _Period, InpFastEma, 0, MODE_EMA, PRICE_CLOSE);
+   h_slow_ema  = iMA(_Symbol, _Period, InpSlowEma, 0, MODE_EMA, PRICE_CLOSE);
+   h_rsi       = iRSI(_Symbol, _Period, InpRsiPeriod, PRICE_CLOSE);
+   h_atr       = iATR(_Symbol, _Period, InpAtrPeriod);
 
-   if(h_fast_ema == INVALID_HANDLE || h_slow_ema == INVALID_HANDLE ||
-      h_rsi == INVALID_HANDLE || h_atr == INVALID_HANDLE)
+   if(h_trend_ema == INVALID_HANDLE || h_fast_ema == INVALID_HANDLE ||
+      h_slow_ema == INVALID_HANDLE || h_rsi == INVALID_HANDLE || h_atr == INVALID_HANDLE)
      {
       Print("Error al crear handles de indicadores para ", _Symbol);
       return(INIT_FAILED);
@@ -150,7 +155,7 @@ int OnInit()
    RenderPanel();
    ChartRedraw();
 
-   Print("Forex Strategy PRO iniciado correctamente en ", _Symbol, " (Digits: ", _Digits, ")");
+   Print("Forex Strategy PRO 2.10 (EURUSD Breakout) iniciado correctamente en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 
@@ -160,11 +165,11 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    m_canvas.Destroy();
+   IndicatorRelease(h_trend_ema);
    IndicatorRelease(h_fast_ema);
    IndicatorRelease(h_slow_ema);
    IndicatorRelease(h_rsi);
    IndicatorRelease(h_atr);
-   EventKillTimer();
    ChartRedraw();
   }
 
@@ -298,25 +303,36 @@ void UpdateDailyStats()
   }
 
 //+------------------------------------------------------------------+
-//| Check Entry Signals (Multifactor Strategy)                       |
+//| Check Entry Signals (London Breakout + EMA Trend Strategy)       |
 //+------------------------------------------------------------------+
 void CheckEntrySignals()
   {
    int open_layers = GetOpenLayersCount();
-   if(open_layers > 0) return; // Signal check only when 0 layers
+   if(open_layers > 0) return;
 
-   double ema_f[], ema_s[], rsi_val[];
+   // Session Time Filter (London / NY Liquidity)
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
+
+   double trend_ema[], ema_f[], ema_s[], rsi_val[];
+   ArraySetAsSeries(trend_ema, true);
    ArraySetAsSeries(ema_f, true);
    ArraySetAsSeries(ema_s, true);
    ArraySetAsSeries(rsi_val, true);
 
-   if(CopyBuffer(h_fast_ema, 0, 0, 2, ema_f) < 2 ||
-      CopyBuffer(h_slow_ema, 0, 0, 2, ema_s) < 2 ||
-      CopyBuffer(h_rsi, 0, 0, 2, rsi_val) < 2)
+   if(CopyBuffer(h_trend_ema, 0, 1, 3, trend_ema) < 3 ||
+      CopyBuffer(h_fast_ema, 0, 1, 3, ema_f) < 3 ||
+      CopyBuffer(h_slow_ema, 0, 1, 3, ema_s) < 3 ||
+      CopyBuffer(h_rsi, 0, 1, 3, rsi_val) < 3)
       return;
 
-   bool buy_condition  = (ema_f[0] > ema_s[0]) && (ema_f[1] <= ema_s[1]) && (rsi_val[0] > InpRsiBuyThreshold);
-   bool sell_condition = (ema_f[0] < ema_s[0]) && (ema_f[1] >= ema_s[1]) && (rsi_val[0] < InpRsiSellThresh);
+   double close_last = iClose(_Symbol, _Period, 1);
+
+   // Buy: Closed candle > 200 EMA + Fast EMA crossover Slow EMA on closed candle + RSI > 52
+   bool buy_condition  = (close_last > trend_ema[0]) && (ema_f[0] > ema_s[0]) && (ema_f[1] <= ema_s[1]) && (rsi_val[0] > InpRsiBuyThreshold);
+   // Sell: Closed candle < 200 EMA + Fast EMA crossover below Slow EMA on closed candle + RSI < 48
+   bool sell_condition = (close_last < trend_ema[0]) && (ema_f[0] < ema_s[0]) && (ema_f[1] >= ema_s[1]) && (rsi_val[0] < InpRsiSellThresh);
 
    double pip = GetPipValue();
 
@@ -326,7 +342,7 @@ void CheckEntrySignals()
       double sl  = ask - (InpStopLossPips * pip);
       double tp  = ask + (InpTakeProfitPips * pip);
       m_trade.Buy(InpBaseLot, _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-      Print("Comprado Capa 1 a ", ask, " SL: ", sl, " TP: ", tp);
+      Print("EURUSD Buy Breakout #1 a ", ask, " SL: ", sl, " TP: ", tp);
      }
    else if(sell_condition)
      {
@@ -334,12 +350,12 @@ void CheckEntrySignals()
       double sl  = bid + (InpStopLossPips * pip);
       double tp  = bid - (InpTakeProfitPips * pip);
       m_trade.Sell(InpBaseLot, _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-      Print("Vendido Capa 1 a ", bid, " SL: ", sl, " TP: ", tp);
+      Print("EURUSD Sell Breakout #1 a ", bid, " SL: ", sl, " TP: ", tp);
      }
   }
 
 //+------------------------------------------------------------------+
-//| Manage Open Positions (Layers, BE, Trailing)                     |
+//| Manage Open Positions (Dynamic ATR Layers, BE, Trailing)         |
 //+------------------------------------------------------------------+
 void ManageOpenPositions()
   {
@@ -351,7 +367,6 @@ void ManageOpenPositions()
    datetime latest_open_time = 0;
    int open_layers = 0;
 
-   // Identify the most recent layer position for accurate grid distance
    for(int i = total_pos - 1; i >= 0; i--)
      {
       if(m_position.SelectByIndex(i))
@@ -366,41 +381,52 @@ void ManageOpenPositions()
                last_open_price  = m_position.PriceOpen();
               }
 
-            // Apply Break Even & Trailing Stop
             if(g_be_active) ApplyBreakEven(m_position.Ticket());
             if(g_trail_active) ApplyTrailingStop(m_position.Ticket());
            }
         }
      }
 
-   // Layer Grid Recovery logic relative to the LATEST open layer price
+   // Dynamic ATR Grid Spacing for Layers
    if(open_layers > 0 && open_layers < InpMaxLayers)
      {
+      double atr[];
+      ArraySetAsSeries(atr, true);
+      CopyBuffer(h_atr, 0, 1, 1, atr);
+
+      double pip = GetPipValue();
+      double atr_grid = (atr[0] > 0) ? (atr[0] * 1.2) : (InpGridStepPips * pip);
+      double grid_dist = MathMax(InpGridStepPips * pip, atr_grid);
+
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double pip = GetPipValue();
-      double grid_dist = InpGridStepPips * pip;
 
       if(pos_type == POSITION_TYPE_BUY)
         {
          if((last_open_price - ask) >= grid_dist)
            {
+            double step_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
             double lot = InpBaseLot * MathPow(1.1, open_layers);
+            if(step_vol > 0) lot = MathFloor(lot / step_vol) * step_vol;
+
             double sl  = ask - (InpStopLossPips * pip);
             double tp  = ask + (InpTakeProfitPips * pip);
-            m_trade.Buy(NormalizeDouble(lot, 2), _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-            Print("Añadida Capa Buy #", open_layers + 1, " a ", ask);
+            m_trade.Buy(lot, _Symbol, ask, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
+            Print("Añadida Capa EURUSD Buy #", open_layers + 1, " a ", ask);
            }
         }
       else if(pos_type == POSITION_TYPE_SELL)
         {
          if((bid - last_open_price) >= grid_dist)
            {
+            double step_vol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
             double lot = InpBaseLot * MathPow(1.1, open_layers);
+            if(step_vol > 0) lot = MathFloor(lot / step_vol) * step_vol;
+
             double sl  = bid + (InpStopLossPips * pip);
             double tp  = bid - (InpTakeProfitPips * pip);
-            m_trade.Sell(NormalizeDouble(lot, 2), _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
-            Print("Añadida Capa Sell #", open_layers + 1, " a ", bid);
+            m_trade.Sell(lot, _Symbol, bid, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), InpTradeComment);
+            Print("Añadida Capa EURUSD Sell #", open_layers + 1, " a ", bid);
            }
         }
      }
@@ -531,7 +557,7 @@ void LockProfits()
               {
                double pip = GetPipValue();
                double current_price = (m_position.PositionType() == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - (2.0 * pip) : current_price + (2.0 * pip);
+               double lock_sl = (m_position.PositionType() == POSITION_TYPE_BUY) ? current_price - (3.0 * pip) : current_price + (3.0 * pip);
                m_trade.PositionModify(m_position.Ticket(), NormalizeDouble(lock_sl, _Digits), m_position.TakeProfit());
               }
            }
@@ -688,7 +714,7 @@ void RenderTabCFG()
    m_canvas.TextOut(15, y, "Par Activo: " + _Symbol, ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Lote Base Inicial: " + DoubleToString(InpBaseLot, 2), ColorToARGB(0xcccccc, 255)); y += 25;
    m_canvas.TextOut(15, y, "Capas Máximas: " + IntegerToString(InpMaxLayers), ColorToARGB(0xcccccc, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Paso de Grid: " + DoubleToString(InpGridStepPips, 1) + " Pips", ColorToARGB(0xcccccc, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Estrategia: London Breakout + EMA200", ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Shield Límite Diario: " + DoubleToString(GetShieldLimitPct(), 1) + "%", ColorToARGB(0x00e676, 255)); y += 25;
    m_canvas.TextOut(15, y, "Break Even: " + DoubleToString(InpBreakEvenPips, 1) + " Pips", ColorToARGB(0xcccccc, 255)); y += 25;
    m_canvas.TextOut(15, y, "Trailing Stop: " + DoubleToString(InpTrailingStart, 1) + " Pips", ColorToARGB(0xcccccc, 255));
@@ -721,19 +747,21 @@ void RenderTabINTEL()
    m_canvas.TextOut(15, y, "ANÁLISIS MULTIFACTOR IA", ColorToARGB(0x00e676, 255));
    y += 30;
 
-   double ema_f[], ema_s[], rsi_val[];
-   ArraySetAsSeries(ema_f, true); ArraySetAsSeries(ema_s, true); ArraySetAsSeries(rsi_val, true);
-   CopyBuffer(h_fast_ema, 0, 0, 1, ema_f);
-   CopyBuffer(h_slow_ema, 0, 0, 1, ema_s);
-   CopyBuffer(h_rsi, 0, 0, 1, rsi_val);
+   double trend_ema[], ema_f[], ema_s[], rsi_val[];
+   ArraySetAsSeries(trend_ema, true); ArraySetAsSeries(ema_f, true); ArraySetAsSeries(ema_s, true); ArraySetAsSeries(rsi_val, true);
+   CopyBuffer(h_trend_ema, 0, 1, 1, trend_ema);
+   CopyBuffer(h_fast_ema, 0, 1, 1, ema_f);
+   CopyBuffer(h_slow_ema, 0, 1, 1, ema_s);
+   CopyBuffer(h_rsi, 0, 1, 1, rsi_val);
 
-   string trend = (ema_f[0] > ema_s[0]) ? "ALCISTA (BUY)" : "BAJISTA (SELL)";
-   color  t_col = (ema_f[0] > ema_s[0]) ? 0x00e676 : 0xff4444;
+   double close_last = iClose(_Symbol, _Period, 1);
+   string trend = (close_last > trend_ema[0]) ? "ALCISTA (BUY)" : "BAJISTA (SELL)";
+   color  t_col = (close_last > trend_ema[0]) ? 0x00e676 : 0xff4444;
 
-   m_canvas.TextOut(15, y, "Tendencia EMA: " + trend, ColorToARGB(t_col, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Tendencia EMA 200: " + trend, ColorToARGB(t_col, 255)); y += 25;
    m_canvas.TextOut(15, y, "Fuerza RSI: " + DoubleToString(rsi_val[0], 1), ColorToARGB(0xffffff, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Filtro Volatilidad ATR: ACTIVO", ColorToARGB(0x00e676, 255)); y += 25;
-   m_canvas.TextOut(15, y, "Estrategia: Capas Adaptativas", ColorToARGB(0xcccccc, 255));
+   m_canvas.TextOut(15, y, "Sesión Activa: LONDRES/NY (07-18 UTC)", ColorToARGB(0x00e676, 255)); y += 25;
+   m_canvas.TextOut(15, y, "Estrategia: London Breakout + Trend", ColorToARGB(0xcccccc, 255));
   }
 
 //+------------------------------------------------------------------+
@@ -780,7 +808,7 @@ void RenderTabHELP()
    int y = 90;
    m_canvas.TextOut(15, y, "GUÍA RÁPIDA DE USO", ColorToARGB(0x00e676, 255));
    y += 25;
-   m_canvas.TextOut(15, y, "1. Compatible con EURUSD, GBPUSD, USDCAD, USDJPY.", ColorToARGB(0x00e676, 255)); y += 20;
+   m_canvas.TextOut(15, y, "1. Estrategia EURUSD London Breakout.", ColorToARGB(0x00e676, 255)); y += 20;
    m_canvas.TextOut(15, y, "2. Shield limita tu pérdida máxima diaria.", ColorToARGB(0xcccccc, 255)); y += 20;
    m_canvas.TextOut(15, y, "3. Trailing Stop asegura tus ganancias.", ColorToARGB(0xcccccc, 255)); y += 20;
    m_canvas.TextOut(15, y, "4. Break Even mueve tu SL a cero.", ColorToARGB(0xcccccc, 255)); y += 20;
